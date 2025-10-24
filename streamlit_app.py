@@ -656,6 +656,7 @@ with col_excel:
             seller_cols=["szállító", "eladó megnevezése"]
         )
         
+        st.session_state.df_nav.drop('eladó adószáma', axis=1, inplace=True)
         st.session_state.df_nav.drop('vevő adószáma', axis=1, inplace=True)
         
         st.dataframe(make_arrow_compatible(st.session_state.df_nav.head(5)))
