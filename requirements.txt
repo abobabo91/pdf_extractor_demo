@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+PyPDF2
+pytesseract
+pdf2image
+openai
+openpyxl
+xlsxwriter
+tiktoken
+xlrd
+opencv-python-headless
