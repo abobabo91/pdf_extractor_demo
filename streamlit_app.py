@@ -268,6 +268,42 @@ def merge_with_minta(df_extracted, df_minta, invoice_col_extracted="Számlaszám
     return df_merged, stats
 
 
+def anonymize_company_names(df, buyer_cols=None, seller_cols=None):
+    """
+    Replace real company names with Buyer/Seller placeholders, keeping internal consistency.
+    Each unique name gets a unique placeholder.
+    """
+    df_copy = df.copy()
+    name_map = {}
+    buyer_counter, seller_counter = 1, 1
+
+    def replace_name(name, role):
+        nonlocal buyer_counter, seller_counter
+        if not isinstance(name, str) or not name.strip():
+            return name
+        if name not in name_map:
+            if role == "buyer":
+                name_map[name] = f"Vevő cég #{buyer_counter}"
+                buyer_counter += 1
+            else:
+                name_map[name] = f"Eladó cég #{seller_counter}"
+                seller_counter += 1
+        return name_map[name]
+
+    # Replace buyers and sellers where applicable
+    if buyer_cols:
+        for col in buyer_cols:
+            if col in df_copy.columns:
+                df_copy[col] = df_copy[col].apply(lambda x: replace_name(x, "buyer"))
+
+    if seller_cols:
+        for col in seller_cols:
+            if col in df_copy.columns:
+                df_copy[col] = df_copy[col].apply(lambda x: replace_name(x, "seller"))
+
+    return df_copy
+
+
 
 # Inicializáljuk a session state változókat
 if 'extracted_text_from_invoice' not in st.session_state:
@@ -383,6 +419,13 @@ with col_pdf:
     
     if len(st.session_state.df_extracted) > 0:        
         st.write("✅ **Adatok kinyerve!** Az alábbi táblázat tartalmazza az eredményeket:")
+        
+        st.session_state.df_extracted = anonymize_company_names(
+            st.session_state.df_extracted,
+            buyer_cols=["Vevő"],
+            seller_cols=["Eladó"]
+        )
+        
         st.dataframe(make_arrow_compatible(st.session_state.df_extracted))
     
         buffer = BytesIO()
@@ -578,6 +621,13 @@ with col_excel:
     
     if len(st.session_state.df_minta) > 0:        
         st.write("✅ **Mintavétel betöltve!** Első néhány sor:")
+        
+        st.session_state.df_minta = anonymize_company_names(
+            st.session_state.df_minta,
+            buyer_cols=["Vevőnév", "Partner", "Vevő", "Megrendelő"],
+            seller_cols=["Szállító", "Eladó", "Szállító név"]
+        )        
+            
         st.dataframe(make_arrow_compatible(st.session_state.df_minta.head(5)))
     
     
@@ -599,7 +649,15 @@ with col_excel:
     
     if len(st.session_state.df_nav) > 0:        
         st.write("✅ **NAV fájl betöltve!** Első néhány sor:")
+        
+        st.session_state.df_nav = anonymize_company_names(
+            st.session_state.df_nav,
+            buyer_cols=["vevőnév", "vevő", "megrendelő", "vevő megnevezése"],
+            seller_cols=["szállító", "eladó megnevezése"]
+        )
         st.dataframe(make_arrow_compatible(st.session_state.df_nav.head(5)))
+    
+    
     
     # Karton fájl
     st.markdown("3) Töltsd fel a **Karton** Excel fájlt:")
@@ -616,6 +674,13 @@ with col_excel:
             st.session_state.df_karton = pd.read_excel(uploaded_excel_file_karton)
     
             st.write("✅ **Karton betöltve!** Első néhány sor:")
+            
+            st.session_state.df_karton = anonymize_company_names(
+                st.session_state.df_karton,
+                buyer_cols=["partnev", "Vevő", "Megrendelő"],
+                seller_cols=["Szállító"]
+            )
+            
             st.dataframe(make_arrow_compatible(st.session_state.df_karton.head(5)))
     
         except Exception as e:
@@ -1047,62 +1112,3 @@ with col_mintanav:
 
 
 
-
-local_test = r"""
-
-os.listdir('./')
-
-
-import tomllib
-
-secrets_path = r"C:\Users\abele\.streamlit\secrets.toml"
-
-with open(secrets_path, "rb") as f:
-    secrets = tomllib.load(f)
-
-openai.api_key = secrets["OPENAI_API_KEY"]
-
-MODEL = "gpt-4o"  # cheapest useful model
-PDF_FILE = "9601013661.pdf"  # <-- replace with your own file path
-
-
-with open(PDF_FILE, "rb") as f:
-    text = extract_text_from_pdf(f)
-
-
-# 2) GPT extraction
-rows, tokens_used = extract_data_with_gpt(PDF_FILE, text, MODEL)
-
-
-# 3) Create DataFrame
-df = pd.DataFrame(rows, columns=[
-    "Fájl", "Eladó", "Vevő", "Számlaszám", "Számla dátum",
-    "Bruttó ár", "Nettó ár", "ÁFA", "Pénznem", "Árfolyam"
-])
-
-
-
-
-
-"""
-
-
-
-local_test = r"""
-df_extracted = pd.read_csv('extract_data.csv')
-df_minta = pd.read_excel('Mintavétel_költségek_Sonneveld és ellenïrzés.xlsx', sheet_name='Mintavétel', skiprows = range(1, 9))
-df_minta.columns = list(df_minta.iloc[0])
-df_minta = df_minta.iloc[1:]
-df_minta["Bizonylatszám"] = df_minta["Bizonylatszám"].astype(str)
-df_karton = pd.read_excel('Könyvelési karton 2024_Sonneveld Kft.xlsx', sheet_name='Munka1')
-
-df_temp = pd.merge(df_minta, df_extracted, how='outer', left_on='Bizonylatszám', right_on='Számlaszám')
-nr_of_columns = len(df_temp.columns)
-
-df_temp = pd.merge(df_temp, df_karton, how='left', left_on='Bizonylatszám', right_on='Bizonylat')
-
-column_to_compare = 'Bizonylatszám'
-columns_to_delete = df_temp.columns[:nr_of_columns]
-df_merged = replace_successive_duplicates(df_temp, column_to_compare, columns_to_delete)
-
-"""
