@@ -132,6 +132,7 @@ def extract_text_from_pdf(uploaded_file):
 
     return pdf_content
 
+
 def apply_excel_formatting(writer, df, sheet_name):
     """Apply consistent styling, column widths, and conditional formatting to exported Excel files."""
     workbook  = writer.book
@@ -140,6 +141,7 @@ def apply_excel_formatting(writer, df, sheet_name):
     # --- General setup ---
     worksheet.hide_gridlines(2)
     worksheet.freeze_panes(1, 0)
+    worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
 
     # --- Header style ---
     header_fmt = workbook.add_format({
@@ -156,24 +158,36 @@ def apply_excel_formatting(writer, df, sheet_name):
     num_fmt = workbook.add_format({'num_format': '#,##0', 'align': 'right'})
     date_fmt = workbook.add_format({'num_format': 'yyyy.mm.dd', 'align': 'center'})
 
-    # --- Auto width ---
+    # --- Helper: what counts as numeric keyword ---
+    numeric_keywords = ['ár', 'áfa', 'érték', 'összeg', 'nettó', 'bruttó']
+    exclude_keywords = ['egyezik']
+
+    # --- Auto width and formatting ---
     for i, col in enumerate(df.columns):
-        # 🆕 auto-convert numeric-like columns
-        if any(k in col.lower() for k in ['ár', 'áfa', 'érték', 'összeg', 'nettó', 'bruttó']):
+        col_lower = col.lower()
+
+        # Detect numeric-like column names but exclude check/status columns
+        is_numeric_like = (
+            any(k in col_lower for k in numeric_keywords)
+            and not any(k in col_lower for k in exclude_keywords)
+        )
+
+        # 🆕 auto-convert numeric-like columns safely
+        if is_numeric_like:
             try:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            except:
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+            except Exception:
                 pass
-        # get max content width for the column
+
+        # Determine column width
         series_as_str = df[col].astype(str)
         max_len = max(series_as_str.map(len).max(), len(col)) + 2
         worksheet.set_column(i, i, max_len)
 
-        # numeric columns
-        if any(k in col.lower() for k in ['ár', 'érték', 'áfa', 'összeg', 'nettó', 'bruttó']):
+        # Apply formats
+        if is_numeric_like:
             worksheet.set_column(i, i, max_len, num_fmt)
-        # date columns
-        elif any(k in col.lower() for k in ['kelte', 'dátum']):
+        elif any(k in col_lower for k in ['kelte', 'dátum']):
             worksheet.set_column(i, i, max_len, date_fmt)
 
     # --- Conditional formatting for "check" columns ---
@@ -181,9 +195,8 @@ def apply_excel_formatting(writer, df, sheet_name):
     red    = workbook.add_format({'bg_color': '#FF4D4D', 'align': 'center'})
     yellow = workbook.add_format({'bg_color': '#FFD966', 'align': 'center'})
 
-    for check_col in [c for c in df.columns if any(x in c.lower() for x in ['egyezik', 'státusz'])]:
+    for check_col in [c for c in df.columns if any(x in c.lower() for x in ['egyezik', 'státusz', 'találat'])]:
         col_idx = df.columns.get_loc(check_col)
-        # green if Igen or ✅
         worksheet.conditional_format(1, col_idx, len(df), col_idx, {
             'type': 'text', 'criteria': 'containing', 'value': 'Igen', 'format': green
         })
@@ -193,22 +206,18 @@ def apply_excel_formatting(writer, df, sheet_name):
         worksheet.conditional_format(1, col_idx, len(df), col_idx, {
             'type': 'text', 'criteria': 'containing', 'value': 'Egyezés', 'format': green
         })
-        # red if Nem or ❌
         worksheet.conditional_format(1, col_idx, len(df), col_idx, {
             'type': 'text', 'criteria': 'containing', 'value': 'Nem', 'format': red
         })
         worksheet.conditional_format(1, col_idx, len(df), col_idx, {
             'type': 'text', 'criteria': 'containing', 'value': '❌', 'format': red
         })
-        # yellow if empty or "Nincs adat"
         worksheet.conditional_format(1, col_idx, len(df), col_idx, {
             'type': 'text', 'criteria': 'containing', 'value': 'Nincs adat', 'format': yellow
         })
-        # yellow if empty or "Nincs adat"
         worksheet.conditional_format(1, col_idx, len(df), col_idx, {
             'type': 'text', 'criteria': 'containing', 'value': 'Csak Mintavétel', 'format': yellow
         })
-
 
 
 
