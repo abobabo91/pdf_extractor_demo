@@ -132,6 +132,82 @@ def extract_text_from_pdf(uploaded_file):
 
     return pdf_content
 
+def apply_excel_formatting(writer, df, sheet_name):
+    """Apply consistent styling, column widths, and conditional formatting to exported Excel files."""
+    workbook  = writer.book
+    worksheet = writer.sheets[sheet_name]
+
+    # --- General setup ---
+    worksheet.hide_gridlines(2)
+    worksheet.freeze_panes(1, 0)
+
+    # --- Header style ---
+    header_fmt = workbook.add_format({
+        'bold': True, 'align': 'center', 'valign': 'vcenter',
+        'fg_color': '#DDEBF7',  # soft blue
+        'border': 0
+    })
+    worksheet.set_row(0, 30)  # double height header
+
+    for col_num, col_name in enumerate(df.columns):
+        worksheet.write(0, col_num, col_name, header_fmt)
+
+    # --- Formats ---
+    num_fmt = workbook.add_format({'num_format': '#,##0', 'align': 'right'})
+    date_fmt = workbook.add_format({'num_format': 'yyyy.mm.dd', 'align': 'center'})
+
+    # --- Auto width ---
+    for i, col in enumerate(df.columns):
+        # 🆕 auto-convert numeric-like columns
+        if any(k in col.lower() for k in ['ár', 'áfa', 'érték', 'összeg', 'nettó', 'bruttó']):
+            try:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            except:
+                pass
+        # get max content width for the column
+        series_as_str = df[col].astype(str)
+        max_len = max(series_as_str.map(len).max(), len(col)) + 2
+        worksheet.set_column(i, i, max_len)
+
+        # numeric columns
+        if any(k in col.lower() for k in ['ár', 'érték', 'áfa', 'összeg', 'nettó', 'bruttó']):
+            worksheet.set_column(i, i, max_len, num_fmt)
+        # date columns
+        elif any(k in col.lower() for k in ['kelte', 'dátum']):
+            worksheet.set_column(i, i, max_len, date_fmt)
+
+    # --- Conditional formatting for "check" columns ---
+    green  = workbook.add_format({'bg_color': '#92D050', 'align': 'center'})
+    red    = workbook.add_format({'bg_color': '#FF4D4D', 'align': 'center'})
+    yellow = workbook.add_format({'bg_color': '#FFD966', 'align': 'center'})
+
+    for check_col in [c for c in df.columns if any(x in c.lower() for x in ['egyezik', 'státusz'])]:
+        col_idx = df.columns.get_loc(check_col)
+        # green if Igen or ✅
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': 'Igen', 'format': green
+        })
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': '✅', 'format': green
+        })
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': 'Egyezés', 'format': green
+        })
+        # red if Nem or ❌
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': 'Nem', 'format': red
+        })
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': '❌', 'format': red
+        })
+        # yellow if empty or "Nincs adat"
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': 'Nincs adat', 'format': yellow
+        })
+        # yellow if empty or "Nincs adat"
+        worksheet.conditional_format(1, col_idx, len(df), col_idx, {
+            'type': 'text', 'criteria': 'containing', 'value': 'Csak Mintavétel', 'format': yellow
+        })
 
 
 
@@ -430,17 +506,19 @@ with col_pdf:
     
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            st.session_state.df_extracted.to_excel(writer, sheet_name='Adatok', index=False)
-    
-        # 🔑 reset pointer
+            df = st.session_state.df_extracted
+            sheet_name = 'Adatok'
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            apply_excel_formatting(writer, df, sheet_name)
+        
         buffer.seek(0)
-    
         st.download_button(
             label="📥 Kinyert adatok letöltése Excelben",
             data=buffer,
             file_name='kinyert_adatok.xlsx',
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 
 
     # Token ár becslés
@@ -583,15 +661,19 @@ with col_pdf:
                 # Excel letöltés opció
                 buffer = BytesIO()
                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                    df_fx_check.to_excel(writer, sheet_name='Arfolyam_ellenorzes', index=False)
+                    df = df_fx_check
+                    sheet_name = 'Arfolyam_ellenorzes'
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    apply_excel_formatting(writer, df, sheet_name)
+                
                 buffer.seek(0)
-    
                 st.download_button(
                     label="📥 Árfolyam ellenőrzés letöltése Excelben",
                     data=buffer,
                     file_name='arfolyam_ellenorzes.xlsx',
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
     
 
 
@@ -813,17 +895,19 @@ with col_left:
     
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            st.session_state.df_merged_minta.to_excel(writer, sheet_name='Minta', index=False)
-    
-        # 🔑 Reset buffer pointer to the start
+            df = st.session_state.df_merged_minta
+            sheet_name = 'Minta'
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            apply_excel_formatting(writer, df, sheet_name)
+        
         buffer.seek(0)
-    
         st.download_button(
             label="📥 Letöltés Excel (Mintavétel)",
             data=buffer,
             file_name='merged_minta.xlsx',
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
     
         st.markdown("### 📊 Statisztika – Mintavétel ellenőrzés")
         for k, v in st.session_state.stats_minta.items():
@@ -961,14 +1045,19 @@ with col_right:
         # Excel letöltés
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            st.session_state.df_merged_nav.to_excel(writer, sheet_name='NAV részletek', index=False)
-
+            df = st.session_state.df_merged_nav
+            sheet_name = 'NAV részletek'
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            apply_excel_formatting(writer, df, sheet_name)
+        
+        buffer.seek(0)
         st.download_button(
             label="📥 Letöltés Excel (NAV részletek)",
             data=buffer,
-            file_name="merged_nav.xlsx",
+            file_name='merged_nav.xlsx',
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 
         st.markdown("### 📊 Statisztika – NAV összehasonlítás")
         for k, v in st.session_state.stats_nav.items():
@@ -1024,15 +1113,20 @@ with col_karton:
     
         # Excel letöltés előkészítés
         buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-            st.session_state.df_filtered_karton.to_excel(writer, sheet_name="Karton szűrt", index=False)
-    
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df = st.session_state.df_filtered_karton
+            sheet_name = 'Karton szűrt'
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            apply_excel_formatting(writer, df, sheet_name)
+        
+        buffer.seek(0)
         st.download_button(
             label="📥 Letöltés Excel (Karton)",
             data=buffer,
-            file_name="filtered_karton.xlsx",
+            file_name='filtered_karton.xlsx',
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
     
         st.markdown("### 📊 Statisztika – Karton keresés")
         for k, v in st.session_state.stats_karton.items():
@@ -1099,16 +1193,20 @@ with col_mintanav:
         st.dataframe(make_arrow_compatible(st.session_state.df_minta_nav))
 
         buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-            st.session_state.df_minta_nav.to_excel(writer, sheet_name="Minta_NAV", index=False)
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df = st.session_state.df_minta_nav
+            sheet_name = 'Minta_NAV'
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            apply_excel_formatting(writer, df, sheet_name)
+        
         buffer.seek(0)
-
         st.download_button(
             label="📥 Letöltés Excel (Minta–NAV)",
             data=buffer,
-            file_name="merged_minta_nav.xlsx",
+            file_name='merged_minta_nav.xlsx',
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 
         st.markdown("### 📊 Statisztika – Minta × NAV összefűzés")
         for k, v in st.session_state.stats_minta_nav.items():
